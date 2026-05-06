@@ -1,0 +1,13 @@
+httpx
+asyncio
+typer
+rich
+groq
+redis
+sqlalchemy
+asyncpg
+fastapi
+uvicorn
+python-dotenv
+fpdf2
+pydantic
