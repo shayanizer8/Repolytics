@@ -5,6 +5,8 @@ import base64
 from typing import Tuple, Dict, Any, List
 from dotenv import load_dotenv
 
+from core.cache import get_cached, set_cached
+
 # Load environment variables
 load_dotenv()
 
@@ -232,3 +234,44 @@ async def fetch_repo(repo_url: str) -> Dict[str, Any]:
             "readme": readme_text,
             "url": repo_json.get("html_url"),
         }
+
+
+async def get_repo(repo_url: str, use_cache: bool = True) -> Dict[str, Any]:
+    """
+    Fetch repository data with optional caching.
+    
+    If use_cache is True:
+    - Attempts to retrieve from Redis cache first
+    - Falls back to fetch_repo() on cache miss
+    - Stores result in cache after fetching
+    
+    If use_cache is False:
+    - Skips cache read
+    - Still stores result in cache after fetching
+    
+    Args:
+        repo_url: GitHub repository URL
+        use_cache: Whether to use caching (default True)
+    
+    Returns:
+        Dictionary with repository data
+    
+    Raises:
+        RepoNotFoundError: If repository not found (404)
+        RateLimitedError: If rate limited (403)
+        GitHubAPIError: On other API errors
+        ValueError: If URL format is invalid or GITHUB_TOKEN not set
+    """
+    # Try to get from cache if enabled
+    if use_cache:
+        cached_data = await get_cached(repo_url)
+        if cached_data is not None:
+            return cached_data
+    
+    # Cache miss or caching disabled — fetch fresh data
+    data = await fetch_repo(repo_url)
+    
+    # Store in cache for future requests
+    await set_cached(repo_url, data)
+    
+    return data
