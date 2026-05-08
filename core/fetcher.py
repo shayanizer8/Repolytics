@@ -238,7 +238,7 @@ async def fetch_repo(repo_url: str) -> Dict[str, Any]:
 
 async def get_repo(repo_url: str, use_cache: bool = True) -> Dict[str, Any]:
     """
-    Fetch repository data with optional caching.
+    Fetch repository data with optional caching
     
     If use_cache is True:
     - Attempts to retrieve from Redis cache first
