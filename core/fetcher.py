@@ -164,7 +164,7 @@ async def fetch_repo(repo_url: str) -> Dict[str, Any]:
     # Base URL for API calls
     base_url = f"https://api.github.com/repos/{owner}/{repo}"
     
-    async with httpx.AsyncClient(headers=headers, timeout=30.0) as client:
+    async with httpx.AsyncClient(headers=headers, timeout=30.0, follow_redirects=True) as client:
         # Define all the API calls as tasks
         tasks = [
             _fetch_with_retry(client, f"{base_url}"),  # Main repo metadata
