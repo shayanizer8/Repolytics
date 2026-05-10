@@ -37,12 +37,14 @@ def display_analysis(result: dict, title: str) -> None:
     tech_table = Table(title="Tech Stack", show_header=True, header_style="bold magenta")
     tech_table.add_column("Property", style="cyan")
     tech_table.add_column("Value", style="green")
-    tech_table.add_row("Language", tech_stack.get("language", "Unknown"))
-    tech_table.add_row("Framework", tech_stack.get("framework", "Unknown"))
+    tech_table.add_row("Languages", tech_stack.get("languages", tech_stack.get("language", "Unknown")))
+    tech_table.add_row("Framework", tech_stack.get("framework") or "Not detected")
+    tech_table.add_row("Database", tech_stack.get("database") or "Not detected")
+    tech_table.add_row("CI/CD", tech_stack.get("ci_cd") or "Not detected")
+    tech_table.add_row("Containerization", tech_stack.get("containerization") or "Not detected")
+    tech_table.add_row("Package Manager", tech_stack.get("package_manager", "Not detected"))
     tech_table.add_row("Has Tests", "✓" if tech_stack.get("has_tests") else "✗")
-    tech_table.add_row("Has CI/CD", "✓" if tech_stack.get("has_ci") else "✗")
-    tech_table.add_row("Containerized", "✓" if tech_stack.get("containerized") else "✗")
-    tech_table.add_row("Database", tech_stack.get("database", "Unknown"))
+    tech_table.add_row("Has CI", "✓" if tech_stack.get("has_ci") else "✗")
     console.print(tech_table)
     
     # 3. Activity Table
@@ -81,24 +83,24 @@ def display_analysis(result: dict, title: str) -> None:
     # 6. Code Smells Panel
     code_smells = result.get("code_smells", {})
     if code_smells:
-        risk_level = code_smells.get("risk_level", "unknown").lower()
-        risk_color = "green" if risk_level == "low" else "yellow" if risk_level == "medium" else "red"
-        
-        smells_text = f"[bold {risk_color}]Risk Level: {risk_level.upper()}[/bold {risk_color}]\n\n"
-        
         flags = code_smells.get("flags", [])
+        suggestions = code_smells.get("suggestions", [])
+        
+        smells_text = ""
         if flags:
-            smells_text += "[bold]Flags:[/bold]\n"
+            smells_text += "[bold]Missing:[/bold]\n"
             for flag in flags:
                 smells_text += f"• {flag}\n"
         
-        suggestions = code_smells.get("suggestions", [])
         if suggestions:
             smells_text += "\n[bold]Suggestions:[/bold]\n"
             for suggestion in suggestions:
                 smells_text += f"• {suggestion}\n"
         
-        console.print(Panel(smells_text, title="Code Smells", border_style=risk_color))
+        if not flags and not suggestions:
+            smells_text = "No issues detected"
+        
+        console.print(Panel(smells_text, title="Project Flags", border_style="yellow"))
 
 
 @app.command()
