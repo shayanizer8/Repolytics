@@ -206,7 +206,6 @@ async def fetch_repo(repo_url: str) -> Dict[str, Any]:
     """
     # Parse URL to get owner and repo
     owner, repo = parse_github_url(repo_url)
-    print(f"DEBUG - Owner: {owner}, Repo: {repo}")
     
     # Get GitHub token from environment
     token = os.getenv("GITHUB_TOKEN")
@@ -222,7 +221,6 @@ async def fetch_repo(repo_url: str) -> Dict[str, Any]:
     
     # Base URL for API calls
     base_url = f"https://api.github.com/repos/{owner}/{repo}"
-    print(f"DEBUG - API URL: {base_url}")
     
     async with httpx.AsyncClient(headers=headers, timeout=30.0, follow_redirects=True) as client:
         # STEP 1: Fetch and verify main repo metadata first
