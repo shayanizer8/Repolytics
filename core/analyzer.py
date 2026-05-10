@@ -44,70 +44,257 @@ def _analyze_tech_stack(file_tree: list, languages: dict) -> dict:
     file_tree_lower = [f.lower() for f in file_tree]
     
     primary_language = _get_primary_language(languages)
-    framework = _detect_framework(file_tree_lower)
-    containerized = _has_containerization(file_tree_lower)
-    has_ci = _has_ci_cd(file_tree_lower)
+    framework = _detect_framework(file_tree_lower, languages)
+    database = _detect_database(file_tree_lower, languages)
+    ci_cd = _detect_ci_cd(file_tree_lower)
+    containerization = _detect_containerization(file_tree_lower)
+    package_manager = _detect_package_manager(file_tree_lower)
     has_tests = _has_tests(file_tree_lower)
-    database = _detect_database(file_tree_lower)
+    has_ci = ci_cd != "None detected"
     
     return {
         "language": primary_language,
         "framework": framework,
-        "containerized": containerized,
-        "has_ci": has_ci,
-        "has_tests": has_tests,
         "database": database,
+        "ci_cd": ci_cd,
+        "containerization": containerization,
+        "package_manager": package_manager,
+        "has_tests": has_tests,
+        "has_ci": has_ci,
+        "is_active": True,  # This is determined in activity analysis
     }
 
 
 def _get_primary_language(languages: dict) -> str:
     if not languages:
-        return "unknown"
+        return "Unknown"
     return max(languages.items(), key=lambda x: x[1])[0]
 
 
-def _detect_framework(file_tree: list) -> str:
-    framework_indicators = {
-        "requirements.txt": "Python",
-        "package.json": "Node.js",
-        "pom.xml": "Java",
-        "cargo.toml": "Rust",
-        "go.mod": "Go",
-    }
+def _detect_framework(file_tree: list, languages: dict) -> str:
+    """
+    Detect framework from file_tree and languages.
+    file_tree is already lowercase.
+    """
+    languages_str = " ".join(languages.keys()).lower()
     
-    for indicator, framework in framework_indicators.items():
-        if indicator in file_tree:
-            return framework
+    # Django / FastAPI detection
+    has_manage_py = "manage.py" in file_tree
+    has_wsgi_py = "wsgi.py" in file_tree
+    has_asgi_py = "asgi.py" in file_tree
+    has_python_files = any(f in file_tree for f in ["manage.py", "wsgi.py", "asgi.py", "requirements.txt", "setup.py", "pyproject.toml"])
     
-    return "unknown"
+    if (has_manage_py or has_wsgi_py or has_asgi_py) and "python" in languages_str:
+        return "FastAPI" if has_asgi_py else "Django"
+    
+    if any(f in file_tree for f in ["requirements.txt", "setup.py", "pyproject.toml"]) and "python" in languages_str:
+        return "Python"
+    
+    # Node.js frameworks
+    if "package.json" in file_tree:
+        if any(f in file_tree for f in ["next.config.js", "next.config.ts"]):
+            return "Next.js"
+        if "nuxt.config.js" in file_tree:
+            return "Nuxt.js"
+        if "angular.json" in file_tree:
+            return "Angular"
+        if "vue.config.js" in file_tree:
+            return "Vue.js"
+        return "Node.js"
+    
+    # Java
+    if any(f in file_tree for f in ["pom.xml", "build.gradle"]):
+        return "Java/Spring"
+    
+    # Rust
+    if "cargo.toml" in file_tree:
+        return "Rust"
+    
+    # Go
+    if "go.mod" in file_tree:
+        return "Go"
+    
+    # PHP
+    if "composer.json" in file_tree:
+        if any("artisan" in f for f in file_tree):
+            return "PHP/Laravel"
+        return "PHP/Composer"
+    
+    # Elixir
+    if "mix.exs" in file_tree:
+        return "Elixir/Phoenix"
+    
+    # .NET
+    if any(f.endswith(".csproj") for f in file_tree):
+        return ".NET"
+    
+    return "Unknown"
 
 
-def _has_containerization(file_tree: list) -> bool:
-    return "dockerfile" in file_tree or "docker-compose.yml" in file_tree
+def _detect_database(file_tree: list, languages: dict) -> str:
+    """
+    Detect database technology from file_tree and languages.
+    Uses partial matching and is case-insensitive.
+    """
+    languages_lower = " ".join(languages.keys()).lower()
+    file_tree_str = " ".join(file_tree).lower()
+    
+    # PostgreSQL / SQL
+    if any(term in file_tree_str for term in ["alembic", "migrations", "migrate"]):
+        return "PostgreSQL/SQL"
+    
+    if "prisma" in file_tree_str:
+        return "PostgreSQL (Prisma)"
+    
+    if "sequelize" in file_tree_str:
+        return "PostgreSQL/MySQL (Sequelize)"
+    
+    # MongoDB
+    if any(term in file_tree_str for term in ["mongoose", "mongo"]):
+        return "MongoDB"
+    
+    # Redis
+    if any("redis" in f for f in file_tree):
+        return "Redis"
+    
+    # Firebase
+    if any("firebase" in f for f in file_tree):
+        return "Firebase"
+    
+    # Supabase
+    if any("supabase" in f for f in file_tree):
+        return "Supabase"
+    
+    # DynamoDB
+    if any("dynamo" in f for f in file_tree):
+        return "DynamoDB"
+    
+    # SQLAlchemy / SQL
+    if any(term in file_tree_str for term in ["sqlalchemy", "models.py"]):
+        return "SQL (SQLAlchemy)"
+    
+    # PHP likely uses MySQL
+    if "php" in languages_lower:
+        return "MySQL (likely)"
+    
+    return "Not detected"
 
 
-def _has_ci_cd(file_tree: list) -> bool:
-    ci_indicators = [".github", ".travis.yml", ".circleci"]
-    return any(indicator in file_tree for indicator in ci_indicators)
+def _detect_ci_cd(file_tree: list) -> str:
+    """
+    Detect CI/CD platform from file_tree.
+    Uses partial matching and is case-insensitive.
+    Returns descriptive string.
+    """
+    file_tree_str = " ".join(file_tree).lower()
+    
+    # GitHub Actions
+    if ".github" in file_tree:
+        return "GitHub Actions"
+    
+    # Travis CI
+    if ".travis.yml" in file_tree:
+        return "Travis CI"
+    
+    # CircleCI
+    if ".circleci" in file_tree:
+        return "CircleCI"
+    
+    # Jenkins
+    if "jenkinsfile" in file_tree_str:
+        return "Jenkins"
+    
+    # GitLab CI
+    if ".gitlab-ci.yml" in file_tree:
+        return "GitLab CI"
+    
+    # Azure Pipelines
+    if "azure-pipelines.yml" in file_tree:
+        return "Azure Pipelines"
+    
+    # Bitbucket Pipelines
+    if "bitbucket-pipelines.yml" in file_tree:
+        return "Bitbucket Pipelines"
+    
+    # Drone CI
+    if ".drone.yml" in file_tree:
+        return "Drone CI"
+    
+    # Vercel
+    if any(f in file_tree for f in ["vercel.json", ".vercel"]):
+        return "Vercel"
+    
+    # Netlify
+    if any(f in file_tree for f in ["netlify.toml", ".netlify"]):
+        return "Netlify"
+    
+    return "None detected"
+
+
+def _detect_containerization(file_tree: list) -> str:
+    """
+    Detect containerization technology from file_tree.
+    Returns descriptive string instead of boolean.
+    """
+    file_tree_lower = [f.lower() for f in file_tree]
+    file_tree_str = " ".join(file_tree_lower)
+    
+    has_dockerfile = any("dockerfile" in f for f in file_tree_lower)
+    has_docker_compose = any("docker-compose" in f for f in file_tree_lower)
+    has_dockerignore = ".dockerignore" in file_tree_lower
+    has_kubernetes = any(term in file_tree_str for term in ["kubernetes", "k8s"])
+    has_helm = any("helm" in f for f in file_tree_lower)
+    
+    if has_docker_compose and has_dockerfile:
+        return "Docker + Compose"
+    elif has_dockerfile or has_dockerignore:
+        return "Docker"
+    elif has_kubernetes:
+        return "Kubernetes"
+    elif has_helm:
+        return "Helm"
+    
+    return "Not detected"
+
+
+def _detect_package_manager(file_tree: list) -> str:
+    """
+    Detect package manager from file_tree.
+    """
+    # Python
+    if "requirements.txt" in file_tree:
+        return "pip"
+    if any(f in file_tree for f in ["pyproject.toml", "poetry.lock"]):
+        return "Poetry"
+    if "pipfile" in file_tree:
+        return "Pipenv"
+    
+    # JavaScript/Node.js
+    if "package-lock.json" in file_tree:
+        return "npm"
+    if "yarn.lock" in file_tree:
+        return "Yarn"
+    if "pnpm-lock.yaml" in file_tree:
+        return "pnpm"
+    
+    # Rust
+    if "cargo.lock" in file_tree:
+        return "Cargo"
+    
+    # Go
+    if "go.sum" in file_tree:
+        return "Go Modules"
+    
+    # Ruby
+    if "gemfile" in file_tree:
+        return "Bundler (Ruby)"
+    
+    return "Not detected"
 
 
 def _has_tests(file_tree: list) -> bool:
     test_indicators = ["test", "tests", "spec"]
     return any(indicator in file_tree for indicator in test_indicators)
-
-
-def _detect_database(file_tree: list) -> str:
-    database_indicators = {
-        "alembic": "PostgreSQL",
-        "mongoose": "MongoDB",
-        "prisma": "PostgreSQL",
-    }
-    
-    for indicator, db in database_indicators.items():
-        if indicator in file_tree:
-            return db
-    
-    return "unknown"
 
 
 def _analyze_activity(
