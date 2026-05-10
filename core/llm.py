@@ -101,17 +101,7 @@ async def detect_code_smells(
     if contributor_count < 2:
         flags.append("Single contributor")
     
-    # Determine risk_level based on flags
-    num_flags = len(flags)
-    if num_flags == 0:
-        risk_level = "Low"
-    elif num_flags <= 2:
-        risk_level = "Medium"
-    else:
-        risk_level = "High"
-    
     return {
-        "risk_level": risk_level,
         "flags": flags,
         "suggestions": [],
     }
@@ -189,4 +179,110 @@ Return ONLY a JSON object with these keys:
                 "community": "",
                 "documentation": "",
             },
+        }
+
+
+async def infer_tech_stack(
+    file_tree: list,
+    languages: dict,
+) -> dict:
+    """
+    LLM-based tech stack inference.
+    Analyzes file tree and language breakdown to identify:
+    - framework
+    - database  
+    - ci_cd
+    - containerization
+    
+    Returns JSON with these fields.
+    Falls back to empty values on error.
+    """
+    if not file_tree:
+        return {
+            "framework": None,
+            "database": None,
+            "ci_cd": None,
+            "containerization": None,
+        }
+    
+    # Build language breakdown summary
+    total_bytes = sum(languages.values()) if languages else 1
+    language_breakdown = {}
+    if total_bytes > 0:
+        for lang, bytes_count in languages.items():
+            percentage = round((bytes_count / total_bytes) * 100, 1)
+            language_breakdown[lang] = percentage
+    
+    # Sort by percentage descending
+    sorted_langs = sorted(language_breakdown.items(), key=lambda x: x[1], reverse=True)
+    lang_summary = ", ".join([f"{lang}: {pct}%" for lang, pct in sorted_langs[:5]])
+    
+    # Build prompt
+    prompt = f"""Analyze this repository structure and language composition to identify the tech stack.
+
+File Tree (Root Directory Files):
+{', '.join(file_tree[:50])}
+
+Language Breakdown:
+{lang_summary}
+
+For CI/CD detection, check for these specific signals:
+- ".github" or ".github/workflows" in filenames → "GitHub Actions"
+- ".travis.yml" → "Travis CI"
+- ".circleci" → "CircleCI"
+- "Jenkinsfile" → "Jenkins"
+- ".gitlab-ci.yml" → "GitLab CI"
+- "azure-pipelines.yml" → "Azure Pipelines"
+
+For containerization, check for these specific signals:
+- Any file containing "dockerfile" (case-insensitive) → "Docker"
+- Any file containing "docker-compose" → "Docker Compose"
+- Both dockerfile and docker-compose present → "Docker + Compose"
+- ".dockerignore" present → "Docker"
+- "kubernetes" or "k8s" in any filename → "Kubernetes"
+
+Based on this information, infer:
+- framework: The primary web/app framework (e.g., Django, React, Spring, etc.). Return null if not evident.
+- database: Database system(s) used (e.g., PostgreSQL, MongoDB, Redis). Can be multiple separated by +. Return null if not evident.
+- ci_cd: CI/CD platform from the signals above. Return null if not evident.
+- containerization: Containerization tech from the signals above. Return null if not evident.
+- reasoning: One line explaining how you determined this.
+
+Return ONLY valid JSON with these exact keys."""
+    
+    try:
+        client = _get_groq_client()
+        message = await client.chat.completions.create(
+            model=MODEL,
+            temperature=0.1,  # Low temperature for consistency
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expert software engineer. Analyze the provided repository "
+                        "structure and dependency files to identify the tech stack. Be specific "
+                        "and accurate. If you truly cannot determine something return null. "
+                        "Respond with valid JSON only. No markdown, no backticks."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+        )
+        
+        response_text = message.choices[0].message.content.strip()
+        result = json.loads(response_text)
+        
+        return {
+            "framework": result.get("framework"),
+            "database": result.get("database"),
+            "ci_cd": result.get("ci_cd"),
+            "containerization": result.get("containerization"),
+        }
+    except Exception as e:
+        logger.error(f"Error inferring tech stack: {e}")
+        return {
+            "framework": None,
+            "database": None,
+            "ci_cd": None,
+            "containerization": None,
         }
