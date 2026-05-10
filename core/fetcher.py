@@ -2,6 +2,7 @@ import httpx
 import asyncio
 import os
 import base64
+import json
 from typing import Tuple, Dict, Any, List
 from dotenv import load_dotenv
 
@@ -120,6 +121,63 @@ async def _fetch_with_retry(
     return response
 
 
+async def _fetch_subdirectory_contents(
+    client: httpx.AsyncClient,
+    base_url: str,
+    subfolder: str,
+) -> List[str]:
+    """
+    Fetch contents of a subdirectory and return as "{subfolder}/{filename}" list.
+    Returns empty list on 404 or any other error (silently handles missing dirs).
+    """
+    try:
+        url = f"{base_url}/contents/{subfolder}"
+        response = await client.get(url)
+        
+        if response.status_code == 404:
+            # Subdirectory doesn't exist — this is normal
+            return []
+        
+        if response.status_code >= 400:
+            # Other errors — silently skip
+            return []
+        
+        data = response.json()
+        if isinstance(data, list):
+            return [f"{subfolder}/{item.get('name')}" for item in data if item.get("name")]
+        else:
+            # Single file response
+            return [f"{subfolder}/{data.get('name')}"]
+    except Exception:
+        # Any error — just return empty list
+        return []
+
+
+async def _fetch_file_content(
+    client: httpx.AsyncClient,
+    base_url: str,
+    file_path: str,
+) -> str | None:
+    """
+    Fetch content of a specific file (like package.json).
+    Returns decoded content or None on error.
+    """
+    try:
+        url = f"{base_url}/contents/{file_path}"
+        response = await client.get(url)
+        
+        if response.status_code != 200:
+            return None
+        
+        data = response.json()
+        if data.get("encoding") == "base64":
+            content = data.get("content", "")
+            return base64.b64decode(content).decode("utf-8")
+        return data.get("content", "")
+    except Exception:
+        return None
+
+
 async def fetch_repo(repo_url: str) -> Dict[str, Any]:
     """
     Fetch comprehensive data from a GitHub repository.
@@ -204,6 +262,75 @@ async def fetch_repo(repo_url: str) -> Dict[str, Any]:
         if isinstance(tree_data, list):
             file_tree = [item.get("name") for item in tree_data if item.get("name")]
         
+        # STEP 2B: Fetch subdirectories to find Dockerfiles and other config files
+        subfolders_to_check = [
+            "scripts", "docker", "containers", "deploy", "deployment",
+            "devops", "infra", "infrastructure", ".github", "config",
+            "backend", "frontend", "server", "client", "src", "app",
+            "worker", "workers", "tests", "__tests__", "configs",
+            "environments", "helm", "terraform", "ansible", "kubernetes",
+            "api", "models", "routes", "controllers", "services", "middleware",
+            "schemas", "db", "database", "lib", "utils", "helpers",
+            "components", "pages", "hooks", "context", "store", "redux",
+            "public", "static", "assets", "styles", "css", "images",
+            "core", "shared", "common", "packages", "packages/server",
+            "packages/client", "apps", "apps/server", "apps/client",
+            "functions", "lambda", "src/api", "src/backend", "src/frontend",
+            "src/db", "data", "storage", "migrations", "seeds",
+        ]
+        
+        # Only fetch subdirectories that exist in root file_tree
+        subfolders_to_fetch = [
+            sf for sf in subfolders_to_check 
+            if any(sf.lower() == name.lower() for name in file_tree)
+        ]
+        
+        # Fetch all subdirectories concurrently
+        if subfolders_to_fetch:
+            subfolder_tasks = [
+                _fetch_subdirectory_contents(client, base_url, sf)
+                for sf in subfolders_to_fetch
+            ]
+            subfolder_results = await asyncio.gather(*subfolder_tasks)
+            
+            # Extend file_tree with subdirectory contents
+            for subfolder_files in subfolder_results:
+                file_tree.extend(subfolder_files)
+        
+        # STEP 2C: Fetch package.json from root and any subdirectories we fetched
+        # First, look for any package.json in the file_tree (from subdirectories we fetched)
+        package_json_paths = ["package.json"]
+        
+        # Also add package.json from any subdirectory that appears in file_tree
+        for f in file_tree:
+            if "package.json" in f.lower():
+                package_json_paths.append(f)
+        
+        # Also check the predefined subfolders (in case we missed any)
+        for sf in subfolders_to_check:
+            pkg_path = f"{sf}/package.json"
+            if pkg_path not in package_json_paths:
+                package_json_paths.append(pkg_path)
+        
+        # Deduplicate paths
+        package_json_paths = list(set(package_json_paths))
+        
+        package_json_tasks = [
+            _fetch_file_content(client, base_url, path)
+            for path in package_json_paths
+        ]
+        package_json_results = await asyncio.gather(*package_json_tasks)
+        
+        # Store all package.json contents for analysis
+        package_json_contents = {}
+        for path, content in zip(package_json_paths, package_json_results):
+            if content:
+                try:
+                    pkg_data = json.loads(content)
+                    package_json_contents[path] = pkg_data
+                except:
+                    pass
+        
         # STEP 3: Fetch README separately with graceful 404 handling
         # A 404 on README is normal and expected (not all repos have a README)
         readme_text = ""
@@ -243,6 +370,7 @@ async def fetch_repo(repo_url: str) -> Dict[str, Any]:
             "file_tree": file_tree,
             "readme": readme_text,
             "url": repo_json.get("html_url"),
+            "package_json": package_json_contents,
         }
 
 
