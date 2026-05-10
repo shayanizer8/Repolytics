@@ -148,6 +148,7 @@ async def fetch_repo(repo_url: str) -> Dict[str, Any]:
     """
     # Parse URL to get owner and repo
     owner, repo = parse_github_url(repo_url)
+    print(f"DEBUG - Owner: {owner}, Repo: {repo}")
     
     # Get GitHub token from environment
     token = os.getenv("GITHUB_TOKEN")
@@ -163,24 +164,23 @@ async def fetch_repo(repo_url: str) -> Dict[str, Any]:
     
     # Base URL for API calls
     base_url = f"https://api.github.com/repos/{owner}/{repo}"
+    print(f"DEBUG - API URL: {base_url}")
     
     async with httpx.AsyncClient(headers=headers, timeout=30.0, follow_redirects=True) as client:
-        # Define all the API calls as tasks
+        # STEP 1: Fetch and verify main repo metadata first
+        # If this returns 404, the repo truly doesn't exist
+        repo_response = await _fetch_with_retry(client, f"{base_url}")
+        repo_json = repo_response.json()
+        
+        # STEP 2: Fetch other required data concurrently (safe calls)
         tasks = [
-            _fetch_with_retry(client, f"{base_url}"),  # Main repo metadata
             _fetch_with_retry(client, f"{base_url}/languages"),  # Languages
             _fetch_with_retry(client, f"{base_url}/contributors?per_page=5"),  # Top contributors
             _fetch_with_retry(client, f"{base_url}/contents"),  # Root file tree
-            _fetch_with_retry(client, f"{base_url}/readme"),  # README
         ]
         
-        # Execute all requests concurrently
         responses = await asyncio.gather(*tasks)
-        
-        repo_response, languages_response, contributors_response, tree_response, readme_response = responses
-        
-        # Parse main repo data
-        repo_json = repo_response.json()
+        languages_response, contributors_response, tree_response = responses
         
         # Parse languages
         languages = languages_response.json()
@@ -204,17 +204,27 @@ async def fetch_repo(repo_url: str) -> Dict[str, Any]:
         if isinstance(tree_data, list):
             file_tree = [item.get("name") for item in tree_data if item.get("name")]
         
-        # Parse README (base64 encoded)
+        # STEP 3: Fetch README separately with graceful 404 handling
+        # A 404 on README is normal and expected (not all repos have a README)
         readme_text = ""
         try:
-            readme_json = readme_response.json()
-            if readme_json.get("encoding") == "base64":
-                readme_content = readme_json.get("content", "")
-                readme_text = base64.b64decode(readme_content).decode("utf-8")
+            readme_response = await client.get(f"{base_url}/readme")
+            if readme_response.status_code == 404:
+                # No README file exists — this is normal
+                readme_text = ""
+            elif readme_response.status_code >= 400:
+                # Other errors are still errors, but README is optional
+                readme_text = ""
             else:
-                readme_text = readme_json.get("content", "")
-        except Exception:
-            # README may not exist or be in an unexpected format
+                # Successfully got README
+                readme_json = readme_response.json()
+                if readme_json.get("encoding") == "base64":
+                    readme_content = readme_json.get("content", "")
+                    readme_text = base64.b64decode(readme_content).decode("utf-8")
+                else:
+                    readme_text = readme_json.get("content", "")
+        except Exception as e:
+            # README fetch failed for any reason — just leave it empty
             readme_text = ""
         
         # Construct and return result dictionary
