@@ -61,7 +61,6 @@ python -m cli.main analyze github.com/owner/repo
 
 Options:
 - `--no-cache` - Skip cache and fetch fresh data
-- `--export pdf|markdown` - Export results (coming soon)
 
 ### Compare Two Repositories
 
@@ -69,13 +68,6 @@ Options:
 python -m cli.main compare https://github.com/repo1 https://github.com/repo2
 ```
 
-### Run as API Server
-
-```bash
-uvicorn api.main:app --reload
-```
-
-API will be available at `http://localhost:8000`
 
 ## Output Example
 
@@ -148,18 +140,13 @@ repolytics/
 │   ├── fetcher.py      # GitHub API fetching
 │   ├── llm.py          # LLM-powered insights
 │   ├── cache.py       # Redis caching
-│   └── db.py          # Database models
-├── api/            # FastAPI server
+│   └── db.py          # Database models (future)
+├── api/            # FastAPI server (future)
 ├── web/            # Web frontend (future)
 └── requirements.txt
 ```
 
 ## How It Works
-
-### Tech Stack Detection
-1. **Static Analysis**: Scans file tree for indicators (package.json, requirements.txt, Dockerfiles, etc.)
-2. **Package.json Analysis**: Fetches and parses package.json from root and subdirectories to detect exact dependencies
-3. **LLM Inference**: Uses Groq LLM for deeper framework and database inference
 
 ### Health Scoring
 Scoring adapts based on project type:
@@ -181,9 +168,7 @@ Scoring adapts based on project type:
 - **Language**: Python
 - **LLM**: Groq (Llama 3.3)
 - **CLI**: Rich, Typer
-- **API**: FastAPI
 - **Cache**: Redis
-- **Database**: PostgreSQL (via SQLAlchemy + asyncpg)
 
 ## License
 
